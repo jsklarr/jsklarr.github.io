@@ -42,35 +42,36 @@ input[type=range]{width:100%;accent-color:var(--acc)}
 </head>
 <body>
 <div id="app">
-  <header>
-    <h1 id="ttl">EPUB Speed Reader</h1>
-    <select id="chap" aria-label="Chapter" hidden></select>
-    <label for="file" class="btn">Open EPUB</label>
-  </header>
-  <main id="stage">
-    <div id="empty">
-      <p id="msg">Drop an EPUB anywhere on this page, or choose a file. Your place in each book is saved in this browser.</p>
-      <label for="file" class="btn">Choose EPUB</label>
-    </div>
-    <div id="box" hidden aria-live="off"><span id="l"></span><span id="p"></span><span id="r"></span></div>
-  </main>
-  <footer>
-    <input id="seek" type="range" min="0" max="0" value="0" disabled aria-label="Position in book">
-    <div id="info"></div>
-    <div class="row">
-      <button id="back" disabled title="Back one sentence (Left arrow)">Back</button>
-      <button id="play" disabled>Play</button>
-      <button id="fwd" disabled title="Forward one sentence (Right arrow)">Forward</button>
-    </div>
-    <div class="row">
-      <label>Speed <input id="wpm" type="range" min="100" max="1000" step="25" value="300"> <b id="wv">300</b> wpm</label>
-      <label>Size <input id="fs" type="range" min="28" max="110" step="2" value="56"></label>
-      <label>Words per flash <input id="chunk" type="range" min="1" max="4" value="1"> <b id="cv">1</b></label>
-      <label><input id="pun" type="checkbox" checked> Pause at punctuation</label>
-    </div>
-    <div class="row"><button id="psave" title="Save your place in every book, plus your settings, to a file">Save progress to file</button><button id="pload" title="Restore a progress file you saved earlier">Load progress from file</button><span id="note" class="hint" aria-live="polite"></span></div>
-    <p class="hint">Space plays or pauses. Left and right arrows move by sentence. Up and down arrows change speed.</p>
-  </footer>
+<header>
+<h1 id="ttl">EPUB Speed Reader</h1>
+<select id="chap" aria-label="Chapter" hidden></select>
+<label for="file" class="btn">Open EPUB</label>
+</header>
+<main id="stage">
+<div id="empty">
+<p id="msg">Drop an EPUB anywhere on this page, or choose a file. Your place in each book is saved in this browser.</p>
+<label for="file" class="btn">Choose EPUB</label>
+</div>
+<div id="box" hidden aria-live="off"><span id="l"></span><span id="p"></span><span id="r"></span></div>
+</main>
+<footer>
+<input id="seek" type="range" min="0" max="0" value="0" disabled aria-label="Position in book">
+<div id="info"></div>
+<div class="row">
+<button id="back" disabled title="Back one sentence (Left arrow)">Back</button>
+<button id="play" disabled>Play</button>
+<button id="fwd" disabled title="Forward one sentence (Right arrow)">Forward</button>
+</div>
+<div class="row">
+<label>Speed <input id="wpm" type="range" min="100" max="1000" step="25" value="300"> <b id="wv">300</b> wpm</label>
+<label>Size <input id="fs" type="range" min="28" max="110" step="2" value="56"></label>
+<label>Words per flash <input id="chunk" type="range" min="1" max="4" value="1"> <b id="cv">1</b></label>
+<label><input id="pun" type="checkbox" checked> Pause at punctuation</label>
+<label><input id="hard" type="checkbox" checked> Slow on hard words</label>
+</div>
+<div class="row"><button id="psave" title="Save your place in every book, plus your settings, to a file">Save progress to file</button><button id="pload" title="Restore a progress file you saved earlier">Load progress from file</button><span id="note" class="hint" aria-live="polite"></span></div>
+<p class="hint">Space plays or pauses. Left and right arrows move by sentence. Up and down arrows change speed.</p>
+</footer>
 </div>
 <input id="file" type="file" accept=".epub,application/epub+zip" hidden>
 <input id="pfile" type="file" accept=".json,application/json" hidden>
@@ -78,171 +79,206 @@ input[type=range]{width:100%;accent-color:var(--acc)}
 const $=s=>document.querySelector(s);
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const END=/[.!?]["”’')\]]*$/, MID=/[,;:—–]["”’')\]]*$/;
-let W=[],C=[],idx=0,timer=0,key='',curChap=-1,wpm=+store.get('spd:wpm')||300,chunk=Math.min(4,+store.get('spd:chunk')||1),curS='',curN=1,ticks=0;
+let W=[],C=[],idx=0,timer=0,key='',curChap=-1,wpm=+store.get('spd:wpm')||300,chunk=Math.min(4,+store.get('spd:chunk')||1),curS='',curN=1,ticks=0,FREQ=new Map();
 
 /* ---------- EPUB reading (minimal ZIP reader, no libraries) ---------- */
 async function unzip(buf){
-  const dv=new DataView(buf),u8=new Uint8Array(buf),td=new TextDecoder();
-  let e=u8.length-22;
-  while(e>=0&&dv.getUint32(e,true)!==0x06054b50)e--;
-  if(e<0)throw new Error('zip');
-  let n=dv.getUint16(e+10,true),p=dv.getUint32(e+16,true);const files={};
-  for(;n--;){
-    const nl=dv.getUint16(p+28,true),xl=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true);
-    files[td.decode(u8.subarray(p+46,p+46+nl))]={m:dv.getUint16(p+10,true),cs:dv.getUint32(p+20,true),lo:dv.getUint32(p+42,true)};
-    p+=46+nl+xl+cl;
-  }
-  return async name=>{
-    const f=files[name];if(!f)return null;
-    const s=f.lo+30+dv.getUint16(f.lo+26,true)+dv.getUint16(f.lo+28,true),d=u8.subarray(s,s+f.cs);
-    if(f.m===0)return td.decode(d);
-    const out=await new Response(new Blob([d]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
-    return td.decode(out);
-  };
+const dv=new DataView(buf),u8=new Uint8Array(buf),td=new TextDecoder();
+let e=u8.length-22;
+while(e>=0&&dv.getUint32(e,true)!==0x06054b50)e--;
+if(e<0)throw new Error('zip');
+let n=dv.getUint16(e+10,true),p=dv.getUint32(e+16,true);const files={};
+for(;n--;){
+const nl=dv.getUint16(p+28,true),xl=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true);
+files[td.decode(u8.subarray(p+46,p+46+nl))]={m:dv.getUint16(p+10,true),cs:dv.getUint32(p+20,true),lo:dv.getUint32(p+42,true)};
+p+=46+nl+xl+cl;
+}
+return async name=>{
+const f=files[name];if(!f)return null;
+const s=f.lo+30+dv.getUint16(f.lo+26,true)+dv.getUint16(f.lo+28,true),d=u8.subarray(s,s+f.cs);
+if(f.m===0)return td.decode(d);
+const out=await new Response(new Blob([d]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+return td.decode(out);
+};
 }
 const dirOf=p=>p.includes('/')?p.slice(0,p.lastIndexOf('/')+1):'';
 const norm=p=>{const o=[];for(const s of p.split('/')){if(s==='..')o.pop();else if(s&&s!=='.')o.push(s)}return o.join('/')};
 async function parseEpub(buf){
-  const read=await unzip(buf),xml=s=>new DOMParser().parseFromString(s,'application/xml');
-  const opfPath=xml(await read('META-INF/container.xml')).querySelector('rootfile').getAttribute('full-path');
-  const opf=xml(await read(opfPath)),base=dirOf(opfPath),man={};
-  opf.querySelectorAll('manifest > item').forEach(i=>man[i.getAttribute('id')]=i.getAttribute('href'));
-  const t=opf.getElementsByTagNameNS('*','title')[0];
-  const book={title:t&&t.textContent.trim()||'Untitled book',words:[],chapters:[]};
-  for(const r of opf.querySelectorAll('spine > itemref')){
-    const href=man[r.getAttribute('idref')];
-    if(!href||r.getAttribute('linear')==='no')continue;
-    const html=await read(norm(base+decodeURIComponent(href.split('#')[0])));
-    if(!html)continue;
-    const d=new DOMParser().parseFromString(html,'text/html');
-    const h=d.querySelector('h1,h2,h3')||d.querySelector('title');
-    const ht=h?h.textContent.replace(/\s+/g,' ').trim().slice(0,70):'';
-    d.body.querySelectorAll('script,style').forEach(e=>e.remove());
-    d.body.querySelectorAll('p,div,h1,h2,h3,h4,h5,h6,li,br,tr,blockquote,section').forEach(e=>e.after(' '));
-    const w=d.body.textContent.replace(/[—–]/g,'$& ').split(/\s+/).filter(Boolean);
-    const lw=[...d.body.querySelectorAll('a')].reduce((n,a)=>n+a.textContent.trim().split(/\s+/).length,0);
-    if(lw>40&&lw>.7*w.length)continue; /* skip a contents page made of links */
-    if(w.length>=30)book.chapters.push({t:ht||'Section '+(book.chapters.length+1),i:book.words.length});
-    for(const x of w){if(x.length>18)for(const y of x.split(/(?<=[./\-_(),])/))book.words.push(y);else book.words.push(x)}
-  }
-  return book;
+const read=await unzip(buf),xml=s=>new DOMParser().parseFromString(s,'application/xml');
+const opfPath=xml(await read('META-INF/container.xml')).querySelector('rootfile').getAttribute('full-path');
+const opf=xml(await read(opfPath)),base=dirOf(opfPath),man={};
+opf.querySelectorAll('manifest > item').forEach(i=>man[i.getAttribute('id')]=i.getAttribute('href'));
+const t=opf.getElementsByTagNameNS('*','title')[0];
+const book={title:t&&t.textContent.trim()||'Untitled book',words:[],chapters:[]};
+for(const r of opf.querySelectorAll('spine > itemref')){
+const href=man[r.getAttribute('idref')];
+if(!href||r.getAttribute('linear')==='no')continue;
+const html=await read(norm(base+decodeURIComponent(href.split('#')[0])));
+if(!html)continue;
+const d=new DOMParser().parseFromString(html,'text/html');
+const h=d.querySelector('h1,h2,h3')||d.querySelector('title');
+const ht=h?h.textContent.replace(/\s+/g,' ').trim().slice(0,70):'';
+d.body.querySelectorAll('script,style').forEach(e=>e.remove());
+d.body.querySelectorAll('p,div,h1,h2,h3,h4,h5,h6,li,br,tr,blockquote,section').forEach(e=>e.after(' '));
+const w=d.body.textContent.replace(/[—–]/g,'$& ').split(/\s+/).filter(Boolean);
+const lw=[...d.body.querySelectorAll('a[href]')].reduce((n,a)=>n+a.textContent.trim().split(/\s+/).length,0);
+if(lw>40&&lw>.7*w.length)continue; /* skip a contents page made of links (only real links: a bare <a id="x"/> would swallow a whole chapter in HTML parsing) */
+if(w.length>=30)book.chapters.push({t:ht||'Section '+(book.chapters.length+1),i:book.words.length});
+for(const x of w){if(x.length>18)for(const y of x.split(/(?<=[./\-_(),])/))book.words.push(y);else book.words.push(x)}
 }
+return book;
+}
+
+/* ---------- Word difficulty ---------- */
+const clean=x=>x.toLowerCase().replace(/[^a-z]/g,'');
+/* rough English syllable count: vowel groups, minus silent endings */
+function syl(w){
+if(w.length<=3)return 1;
+w=w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/,'').replace(/^y/,'');
+const m=w.match(/[aeiouy]{1,2}/g);return m?m.length:1;
+}
+/* multiplier from 1 up to about 2.3: long words, many syllables, and words rare in this book all take longer */
+function hard(x){
+const c=clean(x);if(c.length<4)return 1;
+let m=1;
+if(c.length>=7)m+=Math.min(.5,(c.length-6)*.1);
+const s=syl(c);if(s>=3)m+=Math.min(.5,(s-2)*.2);
+if(c.length>=5&&(FREQ.get(c)||0)<=2)m+=.3;
+return m;
+}
+/* cumulative play time in base-word units, so "time left" reflects hard-word and punctuation pauses */
+let CUM=new Float64Array(1);
+function buildCum(){
+const on=$('#hard').checked,pn=$('#pun').checked;
+CUM=new Float64Array(W.length+1);
+for(let i=0;i<W.length;i++){
+const w=W[i];let u=on?hard(w):1;
+if(pn){if(END.test(w))u+=1.2;else if(MID.test(w))u+=.6}
+CUM[i+1]=CUM[i]+u;
+}
+}
+function countWords(){FREQ=new Map();for(const x of W){const k=clean(x);if(k)FREQ.set(k,(FREQ.get(k)||0)+1)}}
 
 /* ---------- Reader ---------- */
 const orp=n=>n<2?0:n<6?1:n<10?2:n<14?3:4;
+/* a flash takes its base time scaled by its hardest word; punctuation pauses are added on top */
 function delay(w,n){
-  const b=60000/wpm,a=w.length/n;let d=b*n;
-  if($('#pun').checked){if(END.test(w))d+=b*1.2;else if(MID.test(w))d+=b*.6}
-  return d*(a>13?1.32:a>9?1.15:1);
+const b=60000/wpm,h=$('#hard').checked?Math.max(...w.split(' ').map(hard)):1;
+let d=b*n*h;
+if($('#pun').checked){if(END.test(w))d+=b*1.2;else if(MID.test(w))d+=b*.6}
+return d;
 }
 /* a flash holds up to `chunk` words and ends early at a comma or sentence end */
 function endOf(i){let j=i+1;while(j<i+chunk&&j<W.length&&!END.test(W[j-1])&&!MID.test(W[j-1]))j++;return j}
 function info(){
-  if(!W.length)return;
-  const m=Math.ceil((W.length-idx)/wpm);
-  $('#info').textContent=(idx+1).toLocaleString()+' / '+W.length.toLocaleString()+' words, '+Math.round(100*idx/W.length)+'%, '+(m>=60?Math.floor(m/60)+'h '+m%60+'m':m+' min')+' left';
+if(!W.length)return;
+const m=Math.ceil((CUM[W.length]-CUM[idx])/wpm);
+$('#info').textContent=(idx+1).toLocaleString()+' / '+W.length.toLocaleString()+' words, '+Math.round(100*idx/W.length)+'%, '+(m>=60?Math.floor(m/60)+'h '+m%60+'m':m+' min')+' left';
 }
 function show(i){
-  if(!W.length)return;
-  idx=Math.max(0,Math.min(W.length-1,i));
-  const j=endOf(idx),w=W.slice(idx,j).join(' ');
-  let o=orp(w.length);
-  if(j-idx>1){o=Math.floor(w.length/2);if(w[o]===' ')o++}
-  curS=w;curN=j-idx;
-  $('#box').style.setProperty('--n',Math.max(o,w.length-o-1)*2+1);
-  $('#l').textContent=w.slice(0,o);$('#p').textContent=w.charAt(o);$('#r').textContent=w.slice(o+1);
-  /* shrink the text if a wide phrase (e.g. all caps) would overflow the box */
-  const bx=$('#box');bx.style.fontSize='';
-  const tw=e=>{const g=document.createRange();g.selectNodeContents(e);return g.getBoundingClientRect().width};
-  const need=2*Math.max(tw($('#l')),tw($('#r')))+tw($('#p'));
-  if(bx.clientWidth&&need>bx.clientWidth)bx.style.fontSize=parseFloat(getComputedStyle(bx).fontSize)*bx.clientWidth/need*.98+'px';
-  $('#seek').value=idx;
-  let c=0;while(c+1<C.length&&C[c+1].i<=idx)c++;
-  if(C.length&&c!==curChap){curChap=c;$('#chap').value=C[c].i}
-  info();
+if(!W.length)return;
+idx=Math.max(0,Math.min(W.length-1,i));
+const j=endOf(idx),w=W.slice(idx,j).join(' ');
+let o=orp(w.length);
+if(j-idx>1){o=Math.floor(w.length/2);if(w[o]===' ')o++}
+curS=w;curN=j-idx;
+$('#box').style.setProperty('--n',Math.max(o,w.length-o-1)*2+1);
+$('#l').textContent=w.slice(0,o);$('#p').textContent=w.charAt(o);$('#r').textContent=w.slice(o+1);
+/* shrink the text if a wide phrase (e.g. all caps) would overflow the box */
+const bx=$('#box');bx.style.fontSize='';
+const tw=e=>{const g=document.createRange();g.selectNodeContents(e);return g.getBoundingClientRect().width};
+const need=2*Math.max(tw($('#l')),tw($('#r')))+tw($('#p'));
+if(bx.clientWidth&&need>bx.clientWidth)bx.style.fontSize=parseFloat(getComputedStyle(bx).fontSize)*bx.clientWidth/need*.98+'px';
+$('#seek').value=idx;
+let c=0;while(c+1<C.length&&C[c+1].i<=idx)c++;
+if(C.length&&c!==curChap){curChap=c;$('#chap').value=C[c].i}
+info();
 }
 const save=()=>{if(key)store.set(key,idx)};
 const playing=()=>$('#play').textContent==='Pause';
 function pause(){clearTimeout(timer);$('#play').textContent='Play';save()}
 function tick(){
-  const j=endOf(idx);
-  if(j>=W.length)return pause();
-  show(j);if(++ticks%15===0)save();
-  timer=setTimeout(tick,delay(curS,curN));
+const j=endOf(idx);
+if(j>=W.length)return pause();
+show(j);if(++ticks%15===0)save();
+timer=setTimeout(tick,delay(curS,curN));
 }
 function play(){
-  if(!W.length)return;
-  if(endOf(idx)>=W.length)show(0);
-  $('#play').textContent='Pause';
-  timer=setTimeout(tick,delay(curS,curN));
+if(!W.length)return;
+if(endOf(idx)>=W.length)show(0);
+$('#play').textContent='Pause';
+timer=setTimeout(tick,delay(curS,curN));
 }
 const toggle=()=>playing()?pause():play();
 function sentBack(){let i=Math.max(0,idx-1);while(i>0&&!END.test(W[i-1]))i--;show(i)}
 function sentFwd(){let i=idx;while(i<W.length-1&&!END.test(W[i]))i++;show(i+1)}
 function setWpm(v){wpm=Math.max(100,Math.min(1000,v));$('#wpm').value=wpm;$('#wv').textContent=wpm;store.set('spd:wpm',wpm);info()}
-
 async function load(file){
-  pause();
-  $('#msg').textContent='Reading book…';$('#empty').hidden=false;$('#box').hidden=true;
-  try{
-    const b=await parseEpub(await file.arrayBuffer());
-    if(b.words.length<2)throw new Error('empty');
-    W=b.words;C=b.chapters;curChap=-1;key='spd:'+b.title+':'+W.length;
-    $('#ttl').textContent=b.title;document.title=b.title+' – EPUB Speed Reader';
-    const sel=$('#chap');sel.innerHTML='';C.forEach(c=>sel.add(new Option(c.t,c.i)));sel.hidden=C.length<2;
-    $('#seek').max=W.length-1;
-    document.querySelectorAll('#back,#play,#fwd,#seek').forEach(e=>e.disabled=false);
-    $('#empty').hidden=true;$('#box').hidden=false;
-    const s=+store.get(key)||0;show(s<W.length?s:0);
-  }catch(e){
-    W=[];$('#msg').textContent='Couldn’t read that file. It may be copy-protected (DRM) or not a valid EPUB. Try another file.';
-  }
+pause();
+$('#msg').textContent='Reading book…';$('#empty').hidden=false;$('#box').hidden=true;
+try{
+const b=await parseEpub(await file.arrayBuffer());
+if(b.words.length<2)throw new Error('empty');
+W=b.words;C=b.chapters;curChap=-1;key='spd:'+b.title+':'+W.length;countWords();buildCum();
+$('#ttl').textContent=b.title;document.title=b.title+' – EPUB Speed Reader';
+const sel=$('#chap');sel.innerHTML='';C.forEach(c=>sel.add(new Option(c.t,c.i)));sel.hidden=C.length<2;
+$('#seek').max=W.length-1;
+document.querySelectorAll('#back,#play,#fwd,#seek').forEach(e=>e.disabled=false);
+$('#empty').hidden=true;$('#box').hidden=false;
+const s=+store.get(key)||0;show(s<W.length?s:0);
+}catch(e){
+W=[];$('#msg').textContent='Couldn’t read that file. It may be copy-protected (DRM) or not a valid EPUB. Try another file.';
+}
 }
 
 /* ---------- Progress file (backup / restore) ---------- */
-const SETTINGS=/^spd:(wpm|fs|chunk)$/;
+const SETTINGS=/^spd:(wpm|fs|chunk|hard)$/;
 const nBooks=d=>Object.keys(d).filter(k=>!SETTINGS.test(k)).length;
 const note=t=>{$('#note').textContent=t;clearTimeout(note.t);note.t=setTimeout(()=>{$('#note').textContent=''},7000)};
 async function exportProgress(){
-  save();
-  const data={};
-  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('spd:'))data[k]=localStorage.getItem(k)}}catch(e){}
-  if(key)data[key]=String(idx);
-  data['spd:wpm']=String(wpm);data['spd:fs']=String($('#fs').value);data['spd:chunk']=String(chunk);
-  const json=JSON.stringify({app:'epub-speed-reader',version:1,saved:new Date().toISOString(),data},null,1);
-  const name='epub-speed-reader-progress.json';
-  if(window.showSaveFilePicker){
-    try{
-      const h=await showSaveFilePicker({suggestedName:name,types:[{description:'Progress file',accept:{'application/json':['.json']}}]});
-      const w=await h.createWritable();await w.write(json);await w.close();
-      return note('Saved progress for '+nBooks(data)+' book(s) to '+h.name+'.');
-    }catch(e){if(e.name==='AbortError')return}
-  }
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));a.download=name;
-  document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
-  note('Progress file downloaded ('+nBooks(data)+' book(s)).');
+save();
+const data={};
+try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('spd:'))data[k]=localStorage.getItem(k)}}catch(e){}
+if(key)data[key]=String(idx);
+data['spd:wpm']=String(wpm);data['spd:fs']=String($('#fs').value);data['spd:chunk']=String(chunk);data['spd:hard']=$('#hard').checked?'1':'0';
+const json=JSON.stringify({app:'epub-speed-reader',version:1,saved:new Date().toISOString(),data},null,1);
+const name='epub-speed-reader-progress.json';
+if(window.showSaveFilePicker){
+try{
+const h=await showSaveFilePicker({suggestedName:name,types:[{description:'Progress file',accept:{'application/json':['.json']}}]});
+const w=await h.createWritable();await w.write(json);await w.close();
+return note('Saved progress for '+nBooks(data)+' book(s) to '+h.name+'.');
+}catch(e){if(e.name==='AbortError')return}
+}
+const a=document.createElement('a');
+a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));a.download=name;
+document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+note('Progress file downloaded ('+nBooks(data)+' book(s)).');
 }
 async function importProgress(file){
-  pause();
-  try{
-    const j=JSON.parse(await file.text());
-    if(!j||j.app!=='epub-speed-reader'||!j.data||typeof j.data!=='object')throw new Error('format');
-    const ok=Object.entries(j.data).filter(([k,v])=>/^spd:/.test(k)&&k.length<300&&typeof v==='string'&&/^\d{1,9}$/.test(v));
-    if(!ok.length)throw new Error('empty');
-    ok.forEach(([k,v])=>store.set(k,v));
-    setWpm(+store.get('spd:wpm')||300);
-    const f=Math.min(110,Math.max(28,+store.get('spd:fs')||56));$('#fs').value=f;$('#box').style.setProperty('--fs',f+'px');
-    chunk=Math.min(4,Math.max(1,+store.get('spd:chunk')||1));$('#chunk').value=chunk;$('#cv').textContent=chunk;
-    const s=key?store.get(key):null;
-    if(W.length)show(s!==null&&+s<W.length?+s:idx);
-    note('Loaded progress for '+nBooks(Object.fromEntries(ok))+' book(s).'+(W.length?'':' Open a book to pick up where you left off.'));
-  }catch(e){note('That doesn’t look like a progress file from this reader.')}
+pause();
+try{
+const j=JSON.parse(await file.text());
+if(!j||j.app!=='epub-speed-reader'||!j.data||typeof j.data!=='object')throw new Error('format');
+const ok=Object.entries(j.data).filter(([k,v])=>/^spd:/.test(k)&&k.length<300&&typeof v==='string'&&/^\d{1,9}$/.test(v));
+if(!ok.length)throw new Error('empty');
+ok.forEach(([k,v])=>store.set(k,v));
+setWpm(+store.get('spd:wpm')||300);
+const f=Math.min(110,Math.max(28,+store.get('spd:fs')||56));$('#fs').value=f;$('#box').style.setProperty('--fs',f+'px');
+chunk=Math.min(4,Math.max(1,+store.get('spd:chunk')||1));$('#chunk').value=chunk;$('#cv').textContent=chunk;
+$('#hard').checked=store.get('spd:hard')!=='0';if(W.length)buildCum();
+const s=key?store.get(key):null;
+if(W.length)show(s!==null&&+s<W.length?+s:idx);
+note('Loaded progress for '+nBooks(Object.fromEntries(ok))+' book(s).'+(W.length?'':' Open a book to pick up where you left off.'));
+}catch(e){note('That doesn’t look like a progress file from this reader.')}
 }
 
 /* ---------- Wiring ---------- */
 $('#wpm').value=wpm;$('#wv').textContent=wpm;
 const fs0=+store.get('spd:fs')||56;$('#fs').value=fs0;$('#box').style.setProperty('--fs',fs0+'px');
+$('#hard').checked=store.get('spd:hard')!=='0';
+$('#hard').onchange=e=>{store.set('spd:hard',e.target.checked?'1':'0');buildCum();info()};
+$('#pun').onchange=()=>{buildCum();info()};
 $('#file').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)load(f)});
 $('#play').onclick=toggle;$('#back').onclick=sentBack;$('#fwd').onclick=sentFwd;
 $('#psave').onclick=exportProgress;$('#pload').onclick=()=>$('#pfile').click();
@@ -259,12 +295,12 @@ addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f)/\.json$/i.test(f.name)?importProgress(f):load(f)});
 addEventListener('pagehide',save);
 addEventListener('keydown',e=>{
-  if(e.target.matches('select,[type=checkbox]')||e.ctrlKey||e.metaKey||e.altKey)return;
-  if(e.key===' '){e.preventDefault();toggle()}
-  else if(e.key==='ArrowLeft'){e.preventDefault();sentBack()}
-  else if(e.key==='ArrowRight'){e.preventDefault();sentFwd()}
-  else if(e.key==='ArrowUp'){e.preventDefault();setWpm(wpm+25)}
-  else if(e.key==='ArrowDown'){e.preventDefault();setWpm(wpm-25)}
+if(e.target.matches('select,[type=checkbox]')||e.ctrlKey||e.metaKey||e.altKey)return;
+if(e.key===' '){e.preventDefault();toggle()}
+else if(e.key==='ArrowLeft'){e.preventDefault();sentBack()}
+else if(e.key==='ArrowRight'){e.preventDefault();sentFwd()}
+else if(e.key==='ArrowUp'){e.preventDefault();setWpm(wpm+25)}
+else if(e.key==='ArrowDown'){e.preventDefault();setWpm(wpm-25)}
 });
 </script>
 </body>
