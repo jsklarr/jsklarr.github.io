@@ -1,1 +1,40 @@
+/* Reset default browser margins so the split fills the whole page */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
 
+/* The flex container holds both halves side by side */
+.container {
+  display: flex;
+  height: 100vh; /* full viewport height */
+  width: 100%;
+}
+
+/* Each half takes up equal space */
+.left,
+.right {
+  flex: 1;          /* each grows to fill 50% */
+  padding: 2rem;    /* inner spacing */
+  display: flex;    /* center content inside each half (optional) */
+  flex-direction: column;
+  justify-content: center;
+  alight-items: center;
+  text-align: center;
+}
+
+/* Optional: different background colors so you can see the split */
+.left {
+  background-color: #e0f7fa;
+}
+
+.right {
+  background-color: #ffe0b2;
+}
+
+@media (max-width: 768px) {
+  .container {
+    flex-direction: column
+  }
+}
